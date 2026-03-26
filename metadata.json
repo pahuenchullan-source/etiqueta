@@ -1,0 +1,5 @@
+{
+  "name": "Extractor de Tabla Quirúrgica",
+  "description": "Aplicación para extraer automáticamente datos de pacientes, cirugías e insumos desde PDFs de tablas quirúrgicas.",
+  "requestFramePermissions": []
+}
