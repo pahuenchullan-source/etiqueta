@@ -21,6 +21,13 @@ export default function App() {
       setError('Por favor, sube un archivo PDF válido.');
       return;
     }
+    
+    // Check file size (Gemini inlineData limit is roughly 20MB, but let's be safe at 15MB)
+    if (selectedFile.size > 15 * 1024 * 1024) {
+      setError('El archivo es demasiado grande (máximo 15MB). Por favor, intenta con un PDF más pequeño.');
+      return;
+    }
+
     setFile(selectedFile);
     setError(null);
     setResults(null);
@@ -141,17 +148,35 @@ export default function App() {
     }
   };
 
+  const [loadingMessage, setLoadingMessage] = useState('Analizando tabla quirúrgica');
+
   const processFile = async (fileToProcess: File) => {
     setIsExtracting(true);
     setError(null);
+    setLoadingMessage('Analizando tabla quirúrgica');
+
+    const messages = [
+      'Identificando pacientes...',
+      'Extrayendo procedimientos...',
+      'Abreviando nombres de cirugías...',
+      'Buscando insumos especiales...',
+      'Casi listo...',
+    ];
+
+    let msgIdx = 0;
+    const interval = setInterval(() => {
+      setLoadingMessage(messages[msgIdx]);
+      msgIdx = (msgIdx + 1) % messages.length;
+    }, 3000);
 
     try {
       const reader = new FileReader();
-      const base64Promise = new Promise<string>((resolve) => {
+      const base64Promise = new Promise<string>((resolve, reject) => {
         reader.onload = () => {
           const base64 = (reader.result as string).split(',')[1];
           resolve(base64);
         };
+        reader.onerror = () => reject(new Error('Error al leer el archivo.'));
       });
       reader.readAsDataURL(fileToProcess);
       const base64 = await base64Promise;
@@ -159,15 +184,33 @@ export default function App() {
       const data = await extractSurgicalData(base64);
       setResults(data);
     } catch (err) {
-      setError('Hubo un error al procesar el archivo. Asegúrate de que sea una tabla quirúrgica legible.');
-      console.error(err);
+      console.error('Processing Error:', err);
+      let errorMessage = 'Hubo un error al procesar el archivo.';
+      
+      if (err instanceof Error) {
+        errorMessage = err.message;
+      } else {
+        errorMessage += ' (Error desconocido)';
+      }
+      
+      setError(errorMessage);
     } finally {
       setIsExtracting(false);
+      clearInterval(interval);
     }
   };
 
   return (
     <div className="min-h-screen p-4 md:p-8 max-w-6xl mx-auto">
+      {!process.env.GEMINI_API_KEY && (
+        <div className="mb-6 p-4 bg-amber-50 border border-amber-200 rounded-xl flex items-center gap-3 text-amber-800 text-sm">
+          <AlertCircle size={18} />
+          <p>
+            <strong>Aviso:</strong> No se ha detectado la clave de API. 
+            Asegúrate de configurar <code>GEMINI_API_KEY</code> en las variables de entorno de Vercel para que el sistema funcione.
+          </p>
+        </div>
+      )}
       <header className="mb-12 text-center md:text-left">
         <motion.h1 
           initial={{ opacity: 0, y: -20 }}
@@ -234,12 +277,43 @@ export default function App() {
             <motion.div 
               initial={{ opacity: 0, x: -10 }}
               animate={{ opacity: 1, x: 0 }}
-              className="p-4 bg-red-50 border border-red-100 rounded-xl flex items-start gap-3 text-red-700"
+              className="p-4 bg-red-50 border border-red-100 rounded-xl flex flex-col gap-3 text-red-700"
             >
-              <AlertCircle className="shrink-0 mt-0.5" size={18} />
-              <p className="text-sm font-medium">{error}</p>
+              <div className="flex items-start gap-3">
+                <AlertCircle className="shrink-0 mt-0.5" size={18} />
+                <div className="space-y-1">
+                  <p className="text-sm font-bold">Error al procesar</p>
+                  <p className="text-xs leading-relaxed opacity-90">{error}</p>
+                </div>
+              </div>
+              {file && (
+                <button 
+                  onClick={() => processFile(file)}
+                  className="text-xs font-bold bg-white border border-red-200 px-3 py-1.5 rounded-lg hover:bg-red-100 transition-colors w-fit ml-7"
+                >
+                  Reintentar análisis
+                </button>
+              )}
             </motion.div>
           )}
+
+          <div className="p-6 glass-panel rounded-2xl space-y-4">
+            <h3 className="text-sm font-semibold text-zinc-900 uppercase tracking-wider">Consejos para el PDF</h3>
+            <ul className="space-y-2 text-xs text-zinc-600">
+              <li className="flex gap-2">
+                <div className="w-1.5 h-1.5 rounded-full bg-blue-400 mt-1 shrink-0" />
+                <span>Asegúrate de que la tabla sea clara y el texto sea legible.</span>
+              </li>
+              <li className="flex gap-2">
+                <div className="w-1.5 h-1.5 rounded-full bg-blue-400 mt-1 shrink-0" />
+                <span>Si es un escaneo, intenta que no esté torcido o con sombras fuertes.</span>
+              </li>
+              <li className="flex gap-2">
+                <div className="w-1.5 h-1.5 rounded-full bg-blue-400 mt-1 shrink-0" />
+                <span>El sistema funciona mejor con tablas estándar de programación.</span>
+              </li>
+            </ul>
+          </div>
 
           <div className="p-6 glass-panel rounded-2xl">
             <h3 className="text-sm font-semibold text-zinc-900 uppercase tracking-wider mb-4">Uso con ZebraDesigner 2.5.0 (9425)</h3>
@@ -277,7 +351,7 @@ export default function App() {
                   <Activity className="absolute inset-0 m-auto text-zinc-900" size={24} />
                 </div>
                 <div>
-                  <h3 className="text-xl font-semibold text-zinc-900">Analizando tabla quirúrgica</h3>
+                  <h3 className="text-xl font-semibold text-zinc-900">{loadingMessage}</h3>
                   <p className="text-zinc-500 max-w-xs mx-auto mt-2">
                     Estamos identificando pacientes, médicos e insumos especiales...
                   </p>
